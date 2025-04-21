@@ -1,0 +1,120 @@
+#include <Arduino.h>
+#include "esp_camera.h"
+#include "BluetoothSerial.h"
+
+#include <ESP_inferencing.h>
+#include "edge-impulse-sdk/dsp/image/image.hpp"
+#define CAMERA_MODEL_AI_THINKER // Has PSRAM
+#include "esp_camera.h"
+// Define camera pins for ESP32-CAM
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+// BLE Serial
+BluetoothSerial SerialBT;
+SemaphoreHandle_t dataSemaphore;
+
+// Task handles
+TaskHandle_t TaskCameraHandle, TaskBLEHandle, TaskProcessingHandle;
+
+// Camera Task (High Priority)
+void TaskCamera(void *pvParameters) {
+    camera_config_t config;
+    config.ledc_channel = LEDC_CHANNEL_0;
+    config.ledc_timer = LEDC_TIMER_0;
+    config.pin_d0 = Y2_GPIO_NUM;
+    config.pin_d1 = Y3_GPIO_NUM;
+    config.pin_d2 = Y4_GPIO_NUM;
+    config.pin_d3 = Y5_GPIO_NUM;
+    config.pin_d4 = Y6_GPIO_NUM;
+    config.pin_d5 = Y7_GPIO_NUM;
+    config.pin_d6 = Y8_GPIO_NUM;
+    config.pin_d7 = Y9_GPIO_NUM;
+    config.pin_xclk = XCLK_GPIO_NUM;
+    config.pin_pclk = PCLK_GPIO_NUM;
+    config.pin_vsync = VSYNC_GPIO_NUM;
+    config.pin_href = HREF_GPIO_NUM;
+    config.pin_sscb_sda = SIOD_GPIO_NUM;
+    config.pin_sscb_scl = SIOC_GPIO_NUM;
+    config.pin_pwdn = PWDN_GPIO_NUM;
+    config.pin_reset = RESET_GPIO_NUM;
+    config.xclk_freq_hz = 20000000;
+    config.pixel_format = PIXFORMAT_JPEG;
+
+    if (psramFound()) {
+        config.frame_size = FRAMESIZE_QVGA;
+        config.jpeg_quality = 10;
+        config.fb_count = 2;
+    } else {
+        config.frame_size = FRAMESIZE_QQVGA;
+        config.jpeg_quality = 12;
+        config.fb_count = 1;
+    }
+
+    esp_err_t err = esp_camera_init(&config);
+    if (err != ESP_OK) {
+        Serial.println("Camera Init Failed");
+        vTaskDelete(NULL);
+    }
+
+    while (1) {
+        camera_fb_t *fb = esp_camera_fb_get();
+        if (!fb) {
+            Serial.println("Camera Capture Failed");
+            continue;
+        }
+        Serial.printf("Captured image size: %d bytes\n", fb->len);
+        esp_camera_fb_return(fb);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// BLE Task (Medium Priority)
+void TaskBLE(void *pvParameters) {
+    SerialBT.begin("ESP32-CAM");
+    while (1) {
+        if (SerialBT.available()) {
+            String receivedData = SerialBT.readString();
+            Serial.printf("Received BLE Data: %s\n", receivedData.c_str());
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+// Processing Task (Low Priority)
+void processingTask(void *pvParameters) {
+    while (1) {
+        if (xSemaphoreTake(dataSemaphore, portMAX_DELAY) == pdTRUE) {
+            printf("Processing Data...\n");
+            vTaskDelay(pdMS_TO_TICKS(500));  // Simulate processing time
+        }
+    }
+}
+
+
+void setup() {
+    Serial.begin(115200);
+    
+    xTaskCreate(TaskCamera, "TaskCamera", 4096, NULL, 3, &TaskCameraHandle); // High Priority
+    xTaskCreate(TaskBLE, "TaskBLE", 2048, NULL, 2, &TaskBLEHandle); // Medium Priority
+    xTaskCreate(processingTask, "Processing", 2048, NULL, 1, &TaskProcessingHandle);
+
+}
+
+void loop() {
+    // FreeRTOS handles scheduling, loop remains empty
+}
