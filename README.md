@@ -33,3 +33,11 @@
 - **Mobile Integration:** Android App with MIT inventor
 
 ---
+
+### 1. Clone the Repository
+
+```bash
+download folder ESP_inferencing 
+cd to your ardunio ide folder
+download CODE.ino file
+Run it on ardunio ide 
